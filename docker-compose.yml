@@ -1,0 +1,72 @@
+volumes:
+  dvwa:
+
+
+networks:
+  dvwa:
+
+
+services:
+  dvwa:
+    build: .
+    image: ghcr.io/digininja/dvwa:latest
+    # Change `always` to `build` to build from local source
+    pull_policy: always
+    environment:
+      - DB_SERVER=db
+      - DEFAULT_SECURITY_LEVEL=low
+      - DISABLE_AUTHENTICATION=true
+    depends_on:
+      - db
+    # Uncomment the next 2 lines to serve local source
+    # volumes:
+    #   - ./:/var/www/html
+    networks:
+      - dvwa
+    ports:
+      - 100.100.10.1:4280:80
+    restart: unless-stopped
+
+  db:
+    image: docker.io/library/mariadb:10
+    environment:
+      - MYSQL_ROOT_PASSWORD=dvwa
+      - MYSQL_DATABASE=dvwa
+      - MYSQL_USER=dvwa
+      - MYSQL_PASSWORD=p@ssw0rd
+    volumes:
+      - dvwa:/var/lib/mysql
+    networks:
+      - dvwa
+    restart: unless-stopped
+
+  waf:
+    user: "0:0"
+    image: owasp/modsecurity-crs:4.9.0-apache-202412020312
+    container_name: waf
+    depends_on: [dvwa]
+    networks: [dvwa]
+    ports:
+      - "100.100.10.1:8080:8080" # through WAF
+    environment:
+      - BACKEND=http://dvwa:80
+      - PORT=8080
+
+      # Turn WAF ON (blocking)
+      - MODSEC_RULE_ENGINE=on
+
+      # Enable audit/error logs mapped to host
+      - MODSEC_AUDIT_ENGINE=on
+      - MODSEC_AUDIT_LOG=/var/log/modsec_audit.log
+      - ERRORLOG=/var/log/modsec_error.log
+      - LOGLEVEL=warn
+
+      # CRS tuning knobs (optional but useful for reproducibility)
+      - BLOCKING_PARANOIA=2
+      - DETECTION_PARANOIA=2
+      - ANOMALY_INBOUND=10
+      - ANOMALY_OUTBOUND=5
+    volumes:
+      - ./logs/modsec_audit.log:/var/log/modsec_audit.log
+      - ./logs/modsec_error.log:/var/log/modsec_error.log
+      - ./waf/rule.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf
